@@ -1,39 +1,51 @@
 #pragma once
 #include <cstdint>
 
-const uint8_t RADIO_ADDRESSES[2][20] = {"PLANE_LNXDXTF", "CONTROLLER_LNXDXTF"};
-const int RADIO_MAX_PAYLOAD = 32;
+#define ESP_CONTROLLER // Controller
+// #define ESP_PLANE // Plane
 
-// ================== SYNC STATE ==================//
-struct SyncState
-{
-    bool engineOn;
-    int radioChannel;
-    bool debugMode;
-};
+extern bool DEBUG_MODE;
 
-// ================== Controller Config ==================//
-// Controller Radio Config
-#define CONTROLLER_RADIO_CE_PIN 21
-#define CONTROLLER_RADIO_CSN_PIN 22
-#define CONTROLLER_RADIO_ADDRESS_IDX 0
+#if defined(ESP_CONTROLLER)
+#define RADIO_CE_PIN 21
+#define RADIO_CSN_PIN 22
+#else if defined(ESP_PLANE)
+#define RADIO_CE_PIN 7
+#define RADIO_CSN_PIN 8
+#endif
+
+#define BUTTON_DELAY 120 // ms
+#define RADIO_DELAY 100   // ms
+// ======================================================= //
+// ================== Controller Config ================== //
+// Led Controller Notification
+#define CONTROLLER_LED_PIN 2
+
 // Controller Axis Range
-#define AXIS_RANGE_MIN -512
-#define AXIS_RANGE_MAX 511
-// deadzone for the controller axis
-#define CONTROLLER_DEADZONE_AXIS 250
+#define CONTROLLER_AXIS_RANGE_MIN -512
+#define CONTROLLER_AXIS_RANGE_MAX 511
+#define CONTROLLER_AXIS_DEADZONE 260
 
-// ================== Plane Config =======================//
-// Plane Radio Config
-#define PLANE_RADIO_CE_PIN 7
-#define PLANE_RADIO_CSN_PIN 8
-#define PLANE_RADIO_ADDRESS_IDX 1
+// Controller TASKS
+const bool CONTROLLER_TASK_SEND_ACTIVE = true;
+const bool CONTROLLER_TASK_RECV_ACTIVE = false;
+const uint8_t CONTROLLER_TASK_RECV_PRIORITY = 1;
+const uint8_t CONTROLLER_TASK_SEND_PRIORITY = 2;
+// ======================================================= //
+// ================== Plane Config ======================= //
 // Plane Motor Pins
-#define PLANE_ESC_PIN 16
-#define PLANE_SERVO_RIGHT_PIN 11
-#define PLANE_SERVO_LEFT_PIN 10
-// Plane Motors consts
+#define PLANE_ESC_PIN 47
+#define PLANE_SERVO_RIGHT_PIN 45
+#define PLANE_SERVO_LEFT_PIN 35
+
+// Plane Motors
 #define PLANE_ESC_PWM_MIN 1000
 #define PLANE_ESC_PWM_MAX 2000
 #define PLANE_SERVO_MIN 0
 #define PLANE_SERVO_MAX 180
+
+// Plane TASKS
+const bool PLANE_TASK_SEND_ACTIVE = false;
+const bool PLANE_TASK_RECV_ACTIVE = true;
+const uint8_t PLANE_TASK_RECV_PRIORITY = 2;
+const uint8_t PLANE_TASK_SEND_PRIORITY = 1;

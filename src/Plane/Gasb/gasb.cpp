@@ -1,102 +1,111 @@
 #include "gasb.hh"
-
+extern bool DEBUG_MODE;
 void GasbPlane::setup()
 {
-    // Setup radio
-    if (!_radio.begin())
-    {
-        Serial.println("Radio hardware is not responding.");
-        return;
-    }
-    _radio.setPALevel(RF24_PA_LOW);
-    _radio.openReadingPipe(1, RADIO_ADDRESSES[PLANE_RADIO_ADDRESS_IDX]);
-    _radio.openWritingPipe(RADIO_ADDRESSES[!PLANE_RADIO_ADDRESS_IDX]);
-    Serial.println("Radio hardware is ready on Plane. CH: " + String(_radio.getChannel()) + "  PA: " + String(_radio.getPALevel()));
-    _syncState.radioChannel = _radio.getChannel();
-    _syncState.debugMode = _debugMode;
     // Setup motors
-    ESP32PWM::allocateTimer(0);
     ESP32PWM::allocateTimer(1);
-    ESP32PWM::allocateTimer(2);
     _aileronLeft.attach(PLANE_SERVO_LEFT_PIN);
+
+    ESP32PWM::allocateTimer(2);
     _aileronRight.attach(PLANE_SERVO_RIGHT_PIN);
+
+    ESP32PWM::allocateTimer(0);
     _esc.setPeriodHertz(50);
     _esc.attach(PLANE_ESC_PIN);
     _esc.write(PLANE_ESC_PWM_MAX / 2);
     delay(1000);
 }
 
-void GasbPlane::loopSystem()
+void GasbPlane::loopSystem(ControllerCommands cmd)
 {
-    _radioSystem();
+    _controllerCMD = cmd;
+    _controlSystem();
     _engineSystem();
     _aileronSystem();
 }
 
-void GasbPlane::_radioSystem()
+void GasbPlane::_controlSystem()
 {
-    _radioReceive();
-    _radioSend();
-}
-void GasbPlane::_radioSend()
-{
-    _radio.stopListening();
-    PlaneDataPacketToController packet;
-    packet.syncState = _syncState;
-    packet.speed = _currentSpeed;
-    bool report = _radio.write(&packet, sizeof(packet));
-    if (!report)
+    if (_controllerCMD.misc == CONTROLLER_MISC_BUTTON::CONTROLLER_MISC_BUTTON_BACK)
     {
-        if (_debugMode)
-        {
-            Serial.println("Failed to send packet to controller");
-        }
+        DEBUG_MODE = !DEBUG_MODE;
+        Serial.printf("DEBUG::GasbPlane::_controlSystem: Debug mode is: %s\n", DEBUG_MODE ? "ON" : "OFF");
+        delay(BUTTON_DELAY);
     }
-    else
+    else if (_controllerCMD.misc == CONTROLLER_MISC_BUTTON::CONTROLLER_MISC_BUTTON_START)
     {
-        if (_debugMode)
-        {
-            Serial.println("Sent packet to controller" + String(packet.speed));
-        }
-    }
-}
-void GasbPlane::_radioReceive()
-
-{
-    _radio.startListening();
-    if (_radio.available())
-    {
-        PlaneDataPacketToPlane packet;
-        _radio.read(&packet, sizeof(packet));
-        _receivedPacket = packet;
-        _debugMode = packet.syncState.debugMode;
-        if (_debugMode)
-        {
-            Serial.println("Received packet from controller" + String(packet.throttle) + " " + String(packet.brake) + " " + String(packet.aileronLeft) + " " + String(packet.aileronRight) + " " + String(packet.syncState.engineOn));
-        }
-        if (packet.syncState.radioChannel != _syncState.radioChannel)
-        {
-            _radio.setChannel(packet.syncState.radioChannel);
-            _syncState.radioChannel = packet.syncState.radioChannel;
-        }
+        _engineOn = !_engineOn;
+        if (DEBUG_MODE)
+            Serial.printf("DEBUG::GasbPlane::_controlSystem: Engine is: %s\n", _engineOn ? "ON" : "OFF");
+        delay(BUTTON_DELAY);
     }
 }
 
 void GasbPlane::_engineSystem()
 {
-    if (_receivedPacket.syncState.engineOn)
+    if (_engineOn)
     {
-        _currentSpeed = _receivedPacket.throttle;
+        int newSpeed;
+        // ACCELERATE/THROTTLE
+        if (_controllerCMD.button == CONTROLLER_BUTTON::CONTROLLER_BUTTON_RT)
+        {
+            newSpeed = map(_controllerCMD.throttle, 0, 1023, PLANE_ESC_PWM_MIN, PLANE_ESC_PWM_MAX);
+        }
+        // BRAKE
+        else if (_controllerCMD.button == CONTROLLER_BUTTON::CONTROLLER_BUTTON_LT)
+        {
+            newSpeed = map(_controllerCMD.brake, 0, 1023, _currentSpeed, PLANE_ESC_PWM_MIN);
+        }
+        else
+        {
+            newSpeed = PLANE_ESC_PWM_MIN + (int)((PLANE_ESC_PWM_MAX - PLANE_ESC_PWM_MIN) * 0.24);
+        }
+        _currentSpeed = newSpeed;
         _esc.write(_currentSpeed);
     }
     else
     {
-        _currentSpeed = PLANE_ESC_PWM_MIN;
-        _esc.write(_currentSpeed);
+        _esc.write(PLANE_ESC_PWM_MIN);
     }
+    if (DEBUG_MODE)
+        Serial.printf("DEBUG::GasbPlane::_engineSystem: Current speed: %d\n" + _currentSpeed);
 }
+
 void GasbPlane::_aileronSystem()
 {
-    _aileronLeft.write(_receivedPacket.aileronLeft);
-    _aileronRight.write(_receivedPacket.aileronRight);
+    int axisRX = _controllerCMD.axisR[0];
+    int axisLY = _controllerCMD.axisL[1];
+
+    int aileronValLeft = _aileronLeft.read();
+    int aileronValRight = _aileronRight.read();
+
+    if (abs(axisLY) > CONTROLLER_AXIS_DEADZONE)
+    {
+        int pitch = map(axisLY, CONTROLLER_AXIS_RANGE_MIN, CONTROLLER_AXIS_RANGE_MAX, PLANE_SERVO_MIN, PLANE_SERVO_MAX);
+        aileronValLeft = pitch;
+        aileronValRight = PLANE_SERVO_MAX - pitch + PLANE_SERVO_MIN;
+    }
+
+    if (abs(axisRX) > CONTROLLER_AXIS_DEADZONE)
+    {
+        int roll = map(axisRX, CONTROLLER_AXIS_RANGE_MIN, CONTROLLER_AXIS_RANGE_MAX, -abs(PLANE_SERVO_MAX - PLANE_SERVO_MIN) / 2, abs(PLANE_SERVO_MAX - PLANE_SERVO_MIN) / 2);
+        aileronValLeft = constrain(aileronValLeft - roll, PLANE_SERVO_MIN, PLANE_SERVO_MAX);
+        aileronValRight = constrain(aileronValRight + roll, PLANE_SERVO_MIN, PLANE_SERVO_MAX);
+    }
+
+    if (abs(axisRX) > CONTROLLER_AXIS_DEADZONE || abs(axisLY) > CONTROLLER_AXIS_DEADZONE)
+    {
+        _aileronLeft.write(PLANE_SERVO_MAX - aileronValLeft + PLANE_SERVO_MIN);
+        _aileronRight.write(aileronValRight);
+        if (DEBUG_MODE)
+            Serial.printf("DEBUG::GasbPlane::_aileronSystem: Aileron left: %d Aileron right: %d\n", aileronValLeft, aileronValRight);
+    }
+}
+
+PlaneStatusPacket GasbPlane::getPlaneStatus()
+{
+    PlaneStatusPacket status;
+    status.engineOn = _engineOn;
+    status.speed = _currentSpeed;
+    return status;
 }

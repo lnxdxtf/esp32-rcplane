@@ -19,18 +19,8 @@ struct SensorsDataPacket
     int magZ;
 };
 
-struct PlaneDataPacketToController
+struct PlaneStatusPacket
 {
     int speed;
-    SyncState syncState;
-    SensorsDataPacket sensors;
-};
-
-struct PlaneDataPacketToPlane
-{
-    int throttle;
-    int brake;
-    int aileronRight;
-    int aileronLeft;
-    SyncState syncState;
+    int engineOn;
 };
